@@ -92,7 +92,7 @@ class ScpTransport
           callback null, files
 
   _getConnection: (callback) ->
-    {hostname, port, username, password, keyfile, useAgent, passphrase} = @settings
+    {hostname, port, username, password, keyfile, useAgent, passphrase, agentForward, connectionHop, hopHostName, hopPort, hopUser} = @settings
 
     if @connection
       return callback null, @connection
@@ -102,10 +102,37 @@ class ScpTransport
     SSHConnection = require "ssh2" if not SSHConnection
 
     connection = new SSHConnection
+    
     wasReady = false
 
     connection.on "ready", ->
       wasReady = true
+      if connectionHop
+        connection2 = new SSHConnection
+        wasReady = false
+        conneciton.exec 'nc '.concat(hopHostName).concat(' ').concat(hopPort), function(err, stream) ->
+          if console.error
+            return console.log('EXEC ERROR: ' + err)
+          connection2.connect
+            sock: stream
+            username: hopUser
+            agent: if useAgent then process.env['SSH_AUTH_SOCK'] else null
+            agentForward: if agentForward then true else false
+
+          connection2.on "ready", ->
+            wasReady = true
+            callback null, connection
+
+          connection2.on "error", (err) =>
+            unless wasReady
+              callback err
+            @connection2 = null
+            @connection = null
+
+          connection2.on "end", =>
+            @connection2 = null
+            @connection = null
+
       callback null, connection
 
     connection.on "error", (err) =>
@@ -130,5 +157,6 @@ class ScpTransport
       privateKey: privateKey
       passphrase: passphrase
       agent: if useAgent then process.env['SSH_AUTH_SOCK'] else null
+      agentForward: if agentForward then true else false
 
     @connection = connection
